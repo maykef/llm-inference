@@ -1,7 +1,7 @@
 #!/bin/bash
 
 ################################################################################
-# LLM Inference Workstation - Core Setup Script (Fixed for Blackwell + HF token)
+# LLM Inference Workstation - Core Setup Script (Blackwell + HF token prompt)
 #
 # Installs:
 # - GCC 12 (needed by CUDA on Ubuntu with GCC 13 default)
@@ -9,24 +9,15 @@
 # - Miniforge (mamba)
 # - Python env with PyTorch NIGHTLY (Blackwell sm_120 support: cu128)
 # - Transformers stack + vLLM (NO FlashAttention; SDPA path; eager mode)
-# - Non-interactive Hugging Face login using your token
+# - Non-interactive Hugging Face login (asks for token securely)
 #
 # Hardware: AMD Threadripper 7970X + RTX Pro 6000 Blackwell (96GB VRAM)
 # OS: Ubuntu Desktop
-#
-# IMPORTANT:
-# - Uses PyTorch 2.10 nightly w/ CUDA 12.8 (Blackwell support)
-# - FlashAttention-2 is SKIPPED due to ABI mismatch with nightlies
-# - Requires Git for HF CLI credential integration
 #
 # Usage: bash setup_llm_core.sh
 ################################################################################
 
 set -e  # Exit on error
-
-# === YOUR HUGGING FACE TOKEN (requested) ===
-HF_TOKEN="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"
-# ===========================================
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -77,7 +68,7 @@ if [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ]; then
   exit 1
 fi
 
-# Install Git early (needed by HF CLI login), plus Git LFS is harmless & useful.
+# Install Git early (needed by HF CLI login / hub), plus Git LFS is handy.
 log_info "Ensuring Git & Git LFS are installed..."
 sudo apt-get update -y
 sudo apt-get install -y git git-lfs
@@ -205,7 +196,7 @@ if [ "$SKIP_MINIFORGE" != "true" ]; then
   log_success "Miniforge installed."
 fi
 
-# Proper parent-shell activation (your requirement)
+# Proper parent-shell activation
 export MAMBA_ROOT_PREFIX="$HOME/miniforge3"
 eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"
 
@@ -244,7 +235,7 @@ fi
 mamba create -n llm-inference python=3.11 -y
 log_success "Environment created."
 
-# Activate using parent shell (your requirement)
+# Activate (parent shell)
 eval "$(mamba shell hook --shell bash)"
 mamba activate llm-inference
 echo ""
@@ -271,25 +262,44 @@ EOF
 echo ""
 
 ################################################################################
-# PHASE 7: HUGGING FACE STACK + NON-INTERACTIVE LOGIN
+# PHASE 7: HUGGING FACE STACK + TOKEN PROMPT LOGIN
 ################################################################################
 log_info "PHASE 7: Installing HuggingFace libs and logging in…"
 pip install --upgrade "transformers>=4.45" accelerate sentencepiece protobuf huggingface_hub
 
-# Ensure Git credential helper is configured (so HF CLI can store token)
+# Ensure Git credential helper is configured (so HF hub can store token)
 git config --global credential.helper store || true
 
-# Non-interactive login using the token you provided
-python << EOF
-from huggingface_hub import login
+# Ask for HF token securely unless provided via env var
+if [ -z "${HF_TOKEN:-}" ]; then
+  echo -n "🔐 Enter your Hugging Face token (starts with hf_): "
+  read -r -s HF_TOKEN
+  echo
+fi
+
+if [[ -z "$HF_TOKEN" ]]; then
+  log_error "Hugging Face token not provided. Set HF_TOKEN env var or re-run and enter it."
+  exit 1
+fi
+
+if [[ "$HF_TOKEN" != hf_* ]]; then
+  log_warning "Token does not start with 'hf_'. Continuing anyway..."
+fi
+
+# Non-interactive login using the provided token (not echoed)
+HF_TOKEN="$HF_TOKEN" python - << 'EOF'
 import os
-token = os.environ.get("HF_TOKEN", "")
-if not token:
+from huggingface_hub import login
+tok = os.environ.get("HF_TOKEN","")
+if not tok:
     raise SystemExit("HF_TOKEN env var missing.")
 print("Logging into Hugging Face Hub (non-interactive)…")
-login(token=token, add_to_git_credential=True)
+login(token=tok, add_to_git_credential=True)
 print("✓ HF login complete.")
 EOF
+
+# Don’t keep token in env after login in this shell
+unset HF_TOKEN
 echo ""
 
 ################################################################################
@@ -518,7 +528,7 @@ echo "  - CUDA Toolkit 12.4 installed"
 echo "  - PyTorch 2.10 nightly with CUDA 12.8"
 echo "  - Blackwell GPU support enabled"
 echo "  - Transformers + vLLM (no FlashAttention)"
-echo "  - Hugging Face login completed (non-interactive)"
+echo "  - Hugging Face login completed (token not stored in script)"
 echo ""
 
 log_info "Next steps:"
@@ -539,7 +549,7 @@ echo "  - Models cached in /scratch/cache"
 echo "  - Use --4bit for bigger models"
 echo ""
 
-# Save a brief install log (DO NOT write the token)
+# Brief install log (no token stored)
 cat > ~/llm-core-install.log << EOF
 LLM Core Installation Log (Blackwell-compatible)
 Date: $(date)
@@ -552,7 +562,7 @@ Hostname: $(hostname)
 - CUDA in PyTorch: $(python -c 'import torch; print(torch.version.cuda)' 2>/dev/null)
 - Compute capability: $(python -c 'import torch; cap = torch.cuda.get_device_capability(0); print(f"sm_{cap[0]}{cap[1]}")' 2>/dev/null)
 - GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader)
-- HF login: completed (token not stored in this log)
+- HF login: completed (token not logged)
 EOF
 
 log_success "Setup complete! Your Blackwell GPU is ready for LLM inference."
