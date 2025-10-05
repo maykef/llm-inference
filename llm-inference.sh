@@ -591,12 +591,12 @@ class LLMInference:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="meta-llama/Llama-2-13b-chat-hf", help="Model name")
-    parser.add_argument("--4bit", action="store_true", help="Use 4-bit quantization")
+    parser.add_argument("--4bit", dest="use_4bit", action="store_true", help="Use 4-bit quantization")
     parser.add_argument("--prompt", default="Hello, how are you?", help="Prompt text")
     args = parser.parse_args()
     
     # Initialize
-    llm = LLMInference(args.model, use_4bit=args.4bit)
+    llm = LLMInference(args.model, use_4bit=args.use_4bit)
     
     # Generate
     print(f"\nPrompt: {args.prompt}\n")
