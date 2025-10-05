@@ -183,7 +183,7 @@ if [ -d "$HOME/miniforge3" ] || command -v mamba &>/dev/null; then
   if [[ $REPLY =~ ^[Nn]$ ]]; then
     log_warning "Removing existing Miniforge..."
     rm -rf "$HOME/miniforge3"
-    sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</d' ~/.bashrc
+    sed -i '/# >>> conda initialize >>>/,/# <<< conda initialize <<</d' ~/.bashrc || true
     log_success "Removed old Miniforge."
   else
     SKIP_MINIFORGE=true
@@ -196,15 +196,43 @@ if [ "$SKIP_MINIFORGE" != "true" ]; then
   log_success "Miniforge installed."
 fi
 
-# Proper parent-shell activation
+# ---- Proper parent-shell activation + persistent init (idempotent) ----
 export MAMBA_ROOT_PREFIX="$HOME/miniforge3"
+
+# 1) Load mamba into THIS shell now
 eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"
 
-if ! command -v mamba &>/dev/null; then
-  log_error "Mamba initialization failed. Please reopen your terminal and re-run."
+# 2) Persist for future shells
+$HOME/miniforge3/bin/mamba shell init -s bash -p "$HOME/miniforge3"
+$HOME/miniforge3/bin/conda init bash
+
+# 3) Ensure the hook line exists in ~/.bashrc (idempotent)
+if ! grep -q 'mamba shell hook --shell bash' ~/.bashrc; then
+  echo 'eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"' >> ~/.bashrc
+fi
+
+# 4) Ensure login shells source ~/.bashrc (Ubuntu sometimes needs this)
+if ! grep -q 'source ~/.bashrc' ~/.profile 2>/dev/null; then
+  echo '' >> ~/.profile
+  echo '# Load interactive bash settings' >> ~/.profile
+  echo 'if [ -f "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi' >> ~/.profile
+fi
+
+# 5) Reload for immediate availability
+# (Use a subshell-safe source; ignore errors if non-interactive)
+if [ -f "$HOME/.bashrc" ]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.bashrc" || true
+fi
+
+# Verify mamba is now available
+if ! command -v mamba &> /dev/null; then
+  log_error "Mamba initialization failed. Try opening a new terminal or run:"
+  echo '  eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"'
   exit 1
 fi
-log_success "Mamba initialized."
+
+log_success "Mamba initialized and persisted."
 echo ""
 
 ################################################################################
