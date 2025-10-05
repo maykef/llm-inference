@@ -196,22 +196,28 @@ if [ "$SKIP_MINIFORGE" != "true" ]; then
   log_success "Miniforge installed."
 fi
 
-# ---- Proper parent-shell activation + persistent init (idempotent) ----
+# ---- Proper parent-shell activation + persistent init ----
 export MAMBA_ROOT_PREFIX="$HOME/miniforge3"
 
 # 1) Load mamba into THIS shell now
 eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"
 
-# 2) Persist for future shells
-$HOME/miniforge3/bin/mamba shell init -s bash -p "$HOME/miniforge3"
-$HOME/miniforge3/bin/conda init bash
+# 2) Persist for future shells (use version-compatible flags)
+if $HOME/miniforge3/bin/mamba shell init -h | grep -q -- "--prefix"; then
+  $HOME/miniforge3/bin/mamba shell init -s bash --prefix "$HOME/miniforge3"
+else
+  $HOME/miniforge3/bin/mamba shell init -s bash
+fi
 
-# 3) Ensure the hook line exists in ~/.bashrc (idempotent)
+# Also initialize conda (safe + idempotent)
+$HOME/miniforge3/bin/conda init bash || true
+
+# 3) Ensure hook exists in ~/.bashrc
 if ! grep -q 'mamba shell hook --shell bash' ~/.bashrc; then
   echo 'eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"' >> ~/.bashrc
 fi
 
-# 4) Ensure login shells source ~/.bashrc (Ubuntu sometimes needs this)
+# 4) Ensure login shells source ~/.bashrc
 if ! grep -q 'source ~/.bashrc' ~/.profile 2>/dev/null; then
   echo '' >> ~/.profile
   echo '# Load interactive bash settings' >> ~/.profile
@@ -219,13 +225,10 @@ if ! grep -q 'source ~/.bashrc' ~/.profile 2>/dev/null; then
 fi
 
 # 5) Reload for immediate availability
-# (Use a subshell-safe source; ignore errors if non-interactive)
-if [ -f "$HOME/.bashrc" ]; then
-  # shellcheck disable=SC1090
-  source "$HOME/.bashrc" || true
-fi
+# shellcheck disable=SC1090
+source ~/.bashrc || true
 
-# Verify mamba is now available
+# Verify mamba
 if ! command -v mamba &> /dev/null; then
   log_error "Mamba initialization failed. Try opening a new terminal or run:"
   echo '  eval "$($HOME/miniforge3/bin/mamba shell hook --shell bash)"'
